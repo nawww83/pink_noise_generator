@@ -42,8 +42,8 @@ T NoiseGenerator<T>::NextSample(T input)
     const auto norma = std::sqrt(std::numbers::pi);
     value /= norma;
     // DC offset коррекция.
-    constexpr T epsilon = 1.71e-9; // new DC offset -120 dB vs -64 dB: no change sign.
-    // constexpr T epsilon = 1.90e-9; // changed sign: overload.
+    // constexpr T epsilon = 1.71e-9; // new DC offset -120 dB vs -64 dB: no change sign.
+    constexpr T epsilon = 1.90e-9; // changed sign: overload.
     value += (mCorrector[0] - mCorrector[1])*epsilon;
     mCorrector[0] -= mCorrector[0]*T(1.e-6);
     mCorrector[1] -= mCorrector[1]*T(2.e-6);
