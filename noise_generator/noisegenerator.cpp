@@ -60,7 +60,7 @@ T NoiseGenerator<T>::NextSample(T input)
     mPrevFilters = iir_output;
     mDCoffset += output;
     mSampleCounter++;
-    if (mSampleCounter % DC_OFFSET_N == 0) {
+    if (mMakeDCoffsetCorrection && ((mSampleCounter % DC_OFFSET_N) == 0)) {
         mDCoffset /= T(DC_OFFSET_N);
         // qDebug() << "DC offset: " << mDCoffset;
         mPrevSample -= mDCoffset; // Коррекция накопленного паразитного смещения.
@@ -68,6 +68,14 @@ T NoiseGenerator<T>::NextSample(T input)
         mSampleCounter = 0;
     }
     return output;
+}
+
+template<typename T>
+void NoiseGenerator<T>::SetDCoffsetCorrection(bool on)
+{
+    mSampleCounter = 0;
+    mDCoffset = 0;
+    mMakeDCoffsetCorrection = on;
 }
 
 template<typename T>
@@ -114,6 +122,12 @@ void NoiseGenerator<T>::SetIirSettings(IirSettings<T> settings)
 {
     mIirSettings = settings;
     Update();
+}
+
+template<typename T>
+IirSettings<T> NoiseGenerator<T>::GetIirSettings() const
+{
+    return mIirSettings;
 }
 
 template<typename T>

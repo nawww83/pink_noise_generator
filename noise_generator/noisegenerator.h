@@ -46,6 +46,15 @@ public:
     T NextSample(T input);
 
     /**
+     * @brief Включить/выключить коррекцию DC offset.
+     * Для оптимизации фильтра коррекцию следует выключить, чтобы получать
+     * реальные ИХ фильтра. Для рабочего режима следует включить для
+     * избегания долгосрочного паразитного смещения уровня.
+     * @param on Вкл/выкл.
+     */
+    void SetDCoffsetCorrection(bool on);
+
+    /**
      * @brief Вспомогательные методы.
      */
     QVector<T> CalculateSequence_3_2(int len);
@@ -58,6 +67,12 @@ public:
      * @param settings Параметры БИХ-фильтра.
      */
     void SetIirSettings(IirSettings<T> settings);
+
+    /**
+     * @brief Получить параметры БИХ-фильтра.
+     * @return Параметры БИХ-фильтра.
+     */
+    IirSettings<T> GetIirSettings() const;
 private:
     /**
      * @brief Порядок КИХ-фильтра.ъ
@@ -121,6 +136,11 @@ private:
      * @brief Счетчик количества отсчетов для контроля DC offset.
      */
     size_t mSampleCounter = 0;
+
+    /**
+     * @brief Делать коррекцию DC offset.
+     */
+    bool mMakeDCoffsetCorrection = true;
 
     /**
      * @brief Сбросить состояния и пересчитать требуемые ИХ.

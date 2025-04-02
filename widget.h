@@ -27,6 +27,8 @@ private slots:
 
     void closeEvent(QCloseEvent* event);
 
+    void on_pushButton_3_clicked();
+
 private:
     Ui::Widget *ui;
 };
