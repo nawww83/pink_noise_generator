@@ -43,10 +43,12 @@ T NoiseGenerator<T>::NextSample(T input)
     const auto norma = std::sqrt(std::numbers::pi);
     iir_output /= norma;
     // DC offset коррекция.
-    constexpr T epsilon = 1.71e-9; // Остаточный DC offset: -120 дБ vs -64 дБ.
-    iir_output += (mCorrector[0] - mCorrector[1])*epsilon;
-    mCorrector[0] -= mCorrector[0]*T(1.e-6);
-    mCorrector[1] -= mCorrector[1]*T(2.e-6);
+    if (mMakeDCoffsetCorrection) {
+        constexpr T epsilon = 1.71e-9; // Остаточный DC offset: -120 дБ vs -64 дБ.
+        iir_output += (mCorrector[0] - mCorrector[1])*epsilon;
+        mCorrector[0] -= mCorrector[0]*T(1.e-6);
+        mCorrector[1] -= mCorrector[1]*T(2.e-6);
+    }
     //
     for (int i = mFirOrder - 1; i > 0; --i) {
         mFirState[i] = mFirState[i - 1];
@@ -97,7 +99,7 @@ QVector<T> NoiseGenerator<T>::CalculateSequence_1_2(int len, int sampling_factor
     for (int i = 1; i < len; ++i) {
         const T value = prev_value * (T(1) - T(1)/T(2)/(i + T(0)));
         prev_value = value;
-        if (sampling_factor > 0 && i % sampling_factor == 0) {
+        if ((sampling_factor == 0) || (sampling_factor > 0 && i % sampling_factor == 0)) {
             result.push_back(value);
         }
     }
