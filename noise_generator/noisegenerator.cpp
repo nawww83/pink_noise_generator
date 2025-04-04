@@ -81,6 +81,12 @@ void NoiseGenerator<T>::SetDCoffsetCorrection(bool on)
 }
 
 template<typename T>
+bool NoiseGenerator<T>::GetDCoffsetCorrectionStatus() const
+{
+    return mMakeDCoffsetCorrection;
+}
+
+template<typename T>
 QVector<T> NoiseGenerator<T>::CalculateSequence_3_2(int len)
 {
     QVector<T> result{1};

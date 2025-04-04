@@ -55,6 +55,12 @@ public:
     void SetDCoffsetCorrection(bool on);
 
     /**
+     * @brief Получить статус коррекции DC offset.
+     * @return Включено/Выключено.
+     */
+    bool GetDCoffsetCorrectionStatus() const;
+
+    /**
      * @brief Вспомогательные методы.
      */
     QVector<T> CalculateSequence_3_2(int len);

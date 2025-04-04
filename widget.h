@@ -19,17 +19,17 @@ public:
     ~Widget();
 
 private slots:
-    void on_pushButton_clicked();
+    void on_btn_plot_clicked();
 
     void updatePlot();
 
-    void on_pushButton_2_clicked();
+    void on_btn_stop_clicked();
 
     void closeEvent(QCloseEvent* event);
 
-    void on_pushButton_3_clicked();
+    void on_btn_optimize_clicked();
 
-    void on_spinBox_editingFinished();
+    void on_spbx_update_interval_editingFinished();
 
     void optimizationFinished();
 
