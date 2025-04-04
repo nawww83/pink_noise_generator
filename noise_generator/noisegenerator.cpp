@@ -1,6 +1,5 @@
 #include "noisegenerator.h"
 #include <cmath>
-// #include <qdebug.h>
 
 template <typename T>
 NoiseGenerator<T>::NoiseGenerator(int fir_order): mFirOrder(fir_order) {

@@ -18,13 +18,15 @@ endif ()
 find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets)
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets)
 
+set(FFT_DIR rfft)
 set(PLOTTER_DIR plotter)
 set(PLOTTER_SRC ${PLOTTER_DIR}/plotter.cpp ${PLOTTER_DIR}/plotter.qrc)
 
 set(NOISE_GEN_DIR noise_generator)
 set(NOISE_GEN_SRC ${NOISE_GEN_DIR}/noisegenerator.cpp ${NOISE_GEN_DIR}/noisegenerator.h)
+set(FFT_SRC ${FFT_DIR}/rfft.cpp ${FFT_DIR}/rfft.h ${FFT_DIR}/cpuid.h)
 
-INCLUDE_DIRECTORIES(${PLOTTER_DIR} ${NOISE_GEN_DIR})
+INCLUDE_DIRECTORIES(${PLOTTER_DIR} ${NOISE_GEN_DIR} ${FFT_DIR})
 
 set(PROJECT_SOURCES
         main.cpp
@@ -33,6 +35,7 @@ set(PROJECT_SOURCES
         widget.ui
         ${PLOTTER_SRC}
         ${NOISE_GEN_SRC}
+        ${FFT_SRC}
 )
 
 if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)

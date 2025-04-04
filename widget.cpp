@@ -8,12 +8,26 @@
 #include <random>
 #include <QFutureWatcher>
 #include <QtConcurrent/QtConcurrentRun>
+#include "rfft.h"
+#include "cpuid.h"
 
-using my_float = double;
+using my_float = float;
 
+constexpr int N_samples = 8192;
 Q_GLOBAL_STATIC(Plotter, plotter);
 Q_GLOBAL_STATIC(NoiseGenerator<my_float>, noise_generator, (8));
 Q_GLOBAL_STATIC(QTimer, timer);
+
+namespace {
+namespace fft {
+    Rfft* g_fft = nullptr;
+    Q_GLOBAL_STATIC(Plotter, plotter);
+    int len_fft = 0;
+    data_t* _in = nullptr;
+    data_t* _out = nullptr;
+    Q_GLOBAL_STATIC(QVector<my_float>, spm);
+}
+}
 
 namespace {
 namespace rng {
@@ -42,6 +56,59 @@ namespace opt {
 
 static int g_update_interval_ms = 40;
 
+static int prepare_fft(int n) {
+    const auto Nfft_est = n;
+    auto lN_est = std::log2(Nfft_est);
+    auto is_power_two = (static_cast<int>( std::pow(2., std::round(lN_est)) ) == Nfft_est);
+    auto lN = (is_power_two) ? static_cast<int>(lN_est + 0.5) : static_cast<int>(lN_est) + 1;
+
+    if (fft::g_fft) {
+        auto lN_prev = fft::g_fft->getLogSize();
+        if (lN_prev == lN)
+            return fft::g_fft->getSize();
+    }
+    if (fft::g_fft) {
+        delete fft::g_fft;
+        fft::g_fft = nullptr;
+    }
+
+    CPUID cpuID(1);
+    const bool isSSE3supported = cpuID.ECX() & 0x1;
+    if (isSSE3supported) {
+        fft::g_fft = new RfftSSE3;
+    } else {
+        fft::g_fft = new Rfftx86;
+    }
+
+    fft::g_fft->setLogSize(lN);
+    return fft::g_fft->getSize();
+}
+
+static void allocate_fft_arrays(int n) {
+    if (fft::_in) {
+        _mm_free(fft::_in);
+        fft::_in = nullptr;
+    }
+    if (fft::_out) {
+        _mm_free(fft::_out);
+        fft::_out = nullptr;
+    }
+    fft::_in  = static_cast<data_t*>(_mm_malloc(n * sizeof(data_t), 16));
+    fft::_out = static_cast<data_t*>(_mm_malloc(n * sizeof(data_t), 16));
+
+    fft::spm->fill(n/2, 0);
+}
+
+static void free_fft_arrays() {
+    if (fft::_in) {
+        _mm_free(fft::_in);
+        fft::_in = nullptr;
+    }
+    if (fft::_out) {
+        _mm_free(fft::_out);
+        fft::_out = nullptr;
+    }
+}
 
 Widget::Widget(QWidget *parent)
     : QWidget(parent)
@@ -55,6 +122,12 @@ Widget::Widget(QWidget *parent)
                                         .mPowers = {3./2., 5./2., 7./2.},
                                         .mCoeffs = {1., -9./8., 145./128.}};
     noise_generator->SetIirSettings(iir_settings);
+    qDebug() << "Size of my float: " << sizeof(my_float);
+    if (std::is_same_v<my_float, float>) {
+        fft::len_fft = prepare_fft(N_samples);
+        allocate_fft_arrays(fft::len_fft);
+        qDebug() << "FFT prepared: len: " << fft::len_fft;
+    }
 
     connect(&g_watcher, &QFutureWatcher<void>::finished, this, &Widget::optimizationFinished);
     connect(timer, &QTimer::timeout, this, &Widget::updatePlot);
@@ -67,21 +140,38 @@ Widget::~Widget()
 
 void Widget::closeEvent(QCloseEvent* event) {
     timer->stop();
+    free_fft_arrays();
+    if (std::is_same_v<my_float, float>) {
+        fft::plotter->close();
+    }
     plotter->close();
 }
 
 void Widget::on_btn_plot_clicked()
 {
+    if (std::is_same_v<my_float, float>) {
+        PlotSettings settings;
+        settings.minX = 0;
+        settings.maxX = fft::len_fft/2;
+        settings.numXTicks = 8;
+        settings.minY = -10;
+        settings.maxY = 50;
+        settings.numYTicks = 6;
+        fft::plotter->setWindowTitle("Power Spectral Density");
+        fft::plotter->setPlotSettings(settings);
+        fft::plotter->clearCurves();
+    }
     ui->btn_optimize->setEnabled(false);
     qDebug() << "plot";
     qDebug() << "DC offset: " << (noise_generator->GetDCoffsetCorrectionStatus() ? "On" : "Off");
     PlotSettings settings;
     settings.minX = 0;
-    settings.maxX = 8192;
+    settings.maxX = N_samples;
     settings.numXTicks = 8;
     settings.minY = -20;
     settings.maxY = 20;
     settings.numYTicks = 4;
+    plotter->setWindowTitle("Pink Noise");
     plotter->setPlotSettings(settings);
     plotter->clearCurves();
     timer->start(g_update_interval_ms);
@@ -89,17 +179,41 @@ void Widget::on_btn_plot_clicked()
 
 void Widget::updatePlot()
 {
-    constexpr int N = 8192;
     static QVector<QPointF> data;
     data.clear();
     my_float t = 0;
-    for (int i = 0; i < N; ++i) {
+    for (int i = 0; i < N_samples; ++i) {
         const my_float input = rng::gauss_distribution(rng::rnd_generator);
         const my_float sample = noise_generator->NextSample(input);
         data.emplace_back(t++, sample);
     }
     plotter->setCurveData(0, data);
     plotter->show();
+    if (std::is_same_v<my_float, float>) {
+        static QVector<QPointF> spm_dB;
+        spm_dB.clear();
+        for(int k = 0; k < N_samples; ++k) {
+            fft::_in[k].real(data.at(k).y());
+            fft::_in[k].imag(0);
+        }
+        for(int k = 0; k < (fft::len_fft - N_samples); ++k) {
+            fft::_in[k].real(0);
+            fft::_in[k].imag(0);
+        }
+        fft::g_fft->c2cfft(fft::_in, fft::_out);
+        my_float f = 0;
+        fft::spm->resize(fft::len_fft/2);
+        my_float* spm = fft::spm->data();
+        for(int k = 0; k < fft::len_fft/2; ++k) {
+            // Усреднение квадратов амплитуд: экспоненциальным фильтром для простоты.
+            const my_float Am2 = 2*(fft::_out[k].real() * fft::_out[k].real() + fft::_out[k].imag() * fft::_out[k].imag())/fft::len_fft;
+            *spm = *spm * my_float(0.995) + my_float(1. - 0.995) * Am2;
+            spm_dB.emplace_back(f++, 10 * std::log10(*spm));
+            spm++;
+        }
+        fft::plotter->setCurveData(0, spm_dB);
+        fft::plotter->show();
+    }
 }
 
 void Widget::on_btn_stop_clicked()
@@ -116,8 +230,8 @@ void Widget::on_btn_stop_clicked()
 
 static void optimize() {
     constexpr bool do_optimization = true;
-    constexpr int sampling_factor = 32;
-    constexpr int N = 16384*sampling_factor;
+    constexpr int sampling_factor = 128;
+    constexpr int N = N_samples*sampling_factor;
     const my_float initial_parameters[NUM_OF_IIRS] {3.933, 1.005, 1.};
     IirSettings<my_float> iir_settings {.mR = {21, 7, 5},
                                 .mTau = {},
@@ -141,14 +255,16 @@ static void optimize() {
         return result / my_float(n);
     };
     if (do_optimization) {
-        for (int iterations = 0; iterations < 7 ; iterations++) {
+        const int num_of_iters = 5;
+        for (int iterations = 0; iterations < num_of_iters ; iterations++) {
+            qDebug() << "Iterations: " << iterations << " from " << (num_of_iters-1);
             for (int s = 0; s < NUM_OF_IIRS; ++s) {
-                qDebug() << "IIR filter index: " << s;
+                qDebug() << "IIR filter index: " << s << " from " << (NUM_OF_IIRS-1);
                 noise_generator->SetIirSettings(iir_settings);
                 sum_error = calculate_error(N);
                 auto& parameter_reference = iir_settings.mTau[s];
                 my_float direction = 1;
-                for (int repeat = 0; repeat < 3; ) {
+                for (int repeat = 0; repeat < 4; ) {
                     if (g_stop_optimization.load()) {
                         g_optimization_failed.store(true);
                         return;
