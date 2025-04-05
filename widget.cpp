@@ -223,9 +223,9 @@ void Widget::on_btn_plot_clicked()
         settings.minX = 0;
         settings.maxX = fft::len_fft/2;
         settings.numXTicks = 8;
-        settings.minY = -10;
-        settings.maxY = 50;
-        settings.numYTicks = 6;
+        settings.minY = -5;
+        settings.maxY = 40;
+        settings.numYTicks = 9;
         fft::plotter->setWindowTitle("Power Spectral Density");
         fft::plotter->setPlotSettings(settings);
         fft::plotter->clearCurves();

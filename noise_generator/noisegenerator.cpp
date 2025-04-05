@@ -101,8 +101,10 @@ template<typename T>
 QVector<T> NoiseGenerator<T>::CalculateSequence_3_2(int len)
 {
     QVector<T> result{1};
+    double prev_value = result.at(0);
     for (int i = 1; i < len; ++i) {
-        const T value = result[i-1] * (T(1) - T(3)/T(2)/(i + T(1)));
+        const double value = prev_value * (1. - 1.5/(i + 1.));
+        prev_value = value;
         result.push_back(value);
     }
     return result;
@@ -112,9 +114,9 @@ template<typename T>
 QVector<T> NoiseGenerator<T>::CalculateSequence_1_2(int len, int sampling_factor)
 {
     QVector<T> result{1};
-    T prev_value = result.at(0);
+    double prev_value = result.at(0);
     for (int i = 1; i < len; ++i) {
-        const T value = prev_value * (T(1) - T(1)/T(2)/(i + T(0)));
+        const double value = prev_value * (1. - 0.5/(i + 0.));
         prev_value = value;
         if ((sampling_factor == 0) || (sampling_factor > 0 && i % sampling_factor == 0)) {
             result.push_back(value);
