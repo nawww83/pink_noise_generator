@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>370</width>
-    <height>115</height>
+    <width>296</width>
+    <height>236</height>
    </rect>
   </property>
   <property name="sizePolicy">
@@ -29,10 +29,13 @@
       <property name="geometry">
        <rect>
         <x>10</x>
-        <y>34</y>
+        <y>30</y>
         <width>75</width>
         <height>24</height>
        </rect>
+      </property>
+      <property name="toolTip">
+       <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Показать осциллограмму шума. Спектр показывается если собрано с типом float 32 бит.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
       </property>
       <property name="text">
        <string>Plot</string>
@@ -54,11 +57,14 @@
      <widget class="QPushButton" name="btn_optimize">
       <property name="geometry">
        <rect>
-        <x>270</x>
-        <y>10</y>
+        <x>90</x>
+        <y>60</y>
         <width>75</width>
         <height>24</height>
        </rect>
+      </property>
+      <property name="toolTip">
+       <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Запустить оптимизацию параметров фильтра.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
       </property>
       <property name="text">
        <string>Optimize</string>
@@ -68,8 +74,8 @@
       <property name="geometry">
        <rect>
         <x>90</x>
-        <y>60</y>
-        <width>181</width>
+        <y>30</y>
+        <width>171</width>
         <height>22</height>
        </rect>
       </property>
@@ -91,6 +97,72 @@
       <property name="value">
        <number>40</number>
       </property>
+     </widget>
+     <widget class="QFrame" name="frame">
+      <property name="geometry">
+       <rect>
+        <x>10</x>
+        <y>100</y>
+        <width>158</width>
+        <height>101</height>
+       </rect>
+      </property>
+      <property name="frameShape">
+       <enum>QFrame::Shape::Box</enum>
+      </property>
+      <property name="frameShadow">
+       <enum>QFrame::Shadow::Raised</enum>
+      </property>
+      <layout class="QVBoxLayout" name="verticalLayout_2">
+       <item>
+        <widget class="QPushButton" name="btn_plot_ir">
+         <property name="toolTip">
+          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Построить ИХ: точную и приближенную.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+         </property>
+         <property name="text">
+          <string>Plot IR</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QSpinBox" name="spbx_ir_samples">
+         <property name="suffix">
+          <string> samples</string>
+         </property>
+         <property name="minimum">
+          <number>1000</number>
+         </property>
+         <property name="maximum">
+          <number>1000000000</number>
+         </property>
+         <property name="singleStep">
+          <number>100000</number>
+         </property>
+         <property name="value">
+          <number>10000000</number>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QSpinBox" name="spbx_sampling_factor_ir">
+         <property name="suffix">
+          <string> sampling factor</string>
+         </property>
+         <property name="minimum">
+          <number>1</number>
+         </property>
+         <property name="maximum">
+          <number>10000</number>
+         </property>
+         <property name="singleStep">
+          <number>10</number>
+         </property>
+         <property name="value">
+          <number>2000</number>
+         </property>
+        </widget>
+       </item>
+      </layout>
      </widget>
     </widget>
    </item>

@@ -33,6 +33,10 @@ private slots:
 
     void optimizationFinished();
 
+    void plotIrFinished();
+
+    void on_btn_plot_ir_clicked();
+
 private:
     Ui::Widget *ui;
 };

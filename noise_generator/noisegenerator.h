@@ -46,19 +46,33 @@ public:
     T NextSample(T input);
 
     /**
-     * @brief Включить/выключить коррекцию DC offset.
+     * @brief Включить/выключить коррекцию DC offset 1.
+     * Для оптимизации фильтра коррекцию следует выключить, чтобы получать
+     * реальные ИХ фильтра.
+     * @param on Вкл/выкл.
+     */
+    void SetDCoffsetCorrection_1(bool on);
+
+    /**
+     * @brief Включить/выключить коррекцию DC offset 2.
      * Для оптимизации фильтра коррекцию следует выключить, чтобы получать
      * реальные ИХ фильтра. Для рабочего режима следует включить для
      * избегания долгосрочного паразитного смещения уровня.
      * @param on Вкл/выкл.
      */
-    void SetDCoffsetCorrection(bool on);
+    void SetDCoffsetCorrection_2(bool on);
 
     /**
-     * @brief Получить статус коррекции DC offset.
+     * @brief Получить статус коррекции DC offset 1.
      * @return Включено/Выключено.
      */
-    bool GetDCoffsetCorrectionStatus() const;
+    bool GetDCoffsetCorrectionStatus_1() const;
+
+    /**
+     * @brief Получить статус коррекции DC offset 2.
+     * @return Включено/Выключено.
+     */
+    bool GetDCoffsetCorrectionStatus_2() const;
 
     /**
      * @brief Вспомогательные методы.
@@ -144,9 +158,14 @@ private:
     size_t mSampleCounter = 0;
 
     /**
-     * @brief Делать коррекцию DC offset.
+     * @brief Делать коррекцию DC offset 1.
      */
-    bool mMakeDCoffsetCorrection = true;
+    bool mMakeDCoffsetCorrection_1 = true;
+
+    /**
+     * @brief Делать коррекцию DC offset 2.
+     */
+    bool mMakeDCoffsetCorrection_2 = true;
 
     /**
      * @brief Сбросить состояния и пересчитать требуемые ИХ.

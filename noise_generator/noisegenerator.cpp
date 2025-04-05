@@ -41,9 +41,9 @@ T NoiseGenerator<T>::NextSample(T input)
     }
     const auto norma = std::sqrt(std::numbers::pi);
     iir_output /= norma;
-    // DC offset коррекция.
-    if (mMakeDCoffsetCorrection) {
-        constexpr T epsilon = 1.71e-9; // Остаточный DC offset: -120 дБ vs -64 дБ.
+    // DC offset 1 коррекция.
+    if (mMakeDCoffsetCorrection_1) {
+        constexpr T epsilon = 1.685e-9; // Остаточный DC offset: -130 дБ vs -64 дБ.
         iir_output += (mCorrector[0] - mCorrector[1])*epsilon;
         mCorrector[0] -= mCorrector[0]*T(1.e-6);
         mCorrector[1] -= mCorrector[1]*T(2.e-6);
@@ -61,7 +61,7 @@ T NoiseGenerator<T>::NextSample(T input)
     mPrevFilters = iir_output;
     mDCoffset += output;
     mSampleCounter++;
-    if (mMakeDCoffsetCorrection && ((mSampleCounter % DC_OFFSET_N) == 0)) {
+    if (mMakeDCoffsetCorrection_2 && ((mSampleCounter % DC_OFFSET_N) == 0)) {
         mDCoffset /= T(DC_OFFSET_N);
         // qDebug() << "DC offset: " << mDCoffset;
         mPrevSample -= mDCoffset; // Коррекция накопленного паразитного смещения.
@@ -72,17 +72,29 @@ T NoiseGenerator<T>::NextSample(T input)
 }
 
 template<typename T>
-void NoiseGenerator<T>::SetDCoffsetCorrection(bool on)
+void NoiseGenerator<T>::SetDCoffsetCorrection_1(bool on)
 {
-    mSampleCounter = 0;
-    mDCoffset = 0;
-    mMakeDCoffsetCorrection = on;
+    mMakeDCoffsetCorrection_1 = on;
 }
 
 template<typename T>
-bool NoiseGenerator<T>::GetDCoffsetCorrectionStatus() const
+bool NoiseGenerator<T>::GetDCoffsetCorrectionStatus_1() const
 {
-    return mMakeDCoffsetCorrection;
+    return mMakeDCoffsetCorrection_1;
+}
+
+template<typename T>
+void NoiseGenerator<T>::SetDCoffsetCorrection_2(bool on)
+{
+    mSampleCounter = 0;
+    mDCoffset = 0;
+    mMakeDCoffsetCorrection_2 = on;
+}
+
+template<typename T>
+bool NoiseGenerator<T>::GetDCoffsetCorrectionStatus_2() const
+{
+    return mMakeDCoffsetCorrection_2;
 }
 
 template<typename T>
