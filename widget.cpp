@@ -124,8 +124,8 @@ static void calculate_exact_spm(int n) {
     fft::spm_exact->clear();
     qreal f = 1.;
     for (int i = 1; i < n; ++i) {
-        // Нормировка: 0 дБ в конце.
-        fft::spm_exact->push_back({f++, 10 * std::log10((n - 1.)/(i))});
+        // Нормировка: -2 дБ в конце.
+        fft::spm_exact->push_back({f++, 10 * std::log10((n - 1.)/(i)) - 2.});
     }
 }
 
