@@ -37,6 +37,12 @@ private slots:
 
     void on_btn_plot_ir_clicked();
 
+    void on_spbx_alpha_1_editingFinished();
+
+    void on_spbx_alpha_2_editingFinished();
+
+    void on_spbx_epsilon_editingFinished();
+
 private:
     Ui::Widget *ui;
 };

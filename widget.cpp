@@ -44,7 +44,8 @@ namespace fft {
     int len_fft = 0;
     data_t* _in = nullptr;
     data_t* _out = nullptr;
-    Q_GLOBAL_STATIC(QVector<my_float>, spm);
+    Q_GLOBAL_STATIC(QVector<qreal>, spm);
+    Q_GLOBAL_STATIC(QVector<QPointF>, spm_exact);
 }
 }
 
@@ -57,7 +58,6 @@ namespace rng {
 }
 
 static QFutureWatcher<void> g_watcher;
-
 static QFutureWatcher<void> g_watcher_plot;
 
 static QString g_label_optimize_button;
@@ -71,8 +71,9 @@ namespace opt {
     IirSettings<my_float> g_iir_settings;
     Q_GLOBAL_STATIC(QVector<QPointF>, g_data_1);
     Q_GLOBAL_STATIC(QVector<QPointF>, g_data_2);
-    my_float maxY = -std::numeric_limits<my_float>::max();
-    my_float minY = std::numeric_limits<my_float>::max();
+    qreal maxY = -std::numeric_limits<my_float>::max();
+    qreal minY = std::numeric_limits<my_float>::max();
+    DCoffsetSettings<my_float> dc_offset_1_settings;
 }
 }
 
@@ -117,8 +118,15 @@ static void allocate_fft_arrays(int n) {
     }
     fft::_in  = static_cast<data_t*>(_mm_malloc(n * sizeof(data_t), 16));
     fft::_out = static_cast<data_t*>(_mm_malloc(n * sizeof(data_t), 16));
+}
 
-    fft::spm->fill(n/2, 0);
+static void calculate_exact_spm(int n) {
+    fft::spm_exact->clear();
+    qreal f = 1.;
+    for (int i = 1; i < n; ++i) {
+        // Нормировка: 0 дБ в конце.
+        fft::spm_exact->push_back({f++, 10 * std::log10((n - 1.)/(i))});
+    }
 }
 
 static void free_fft_arrays() {
@@ -133,24 +141,24 @@ static void free_fft_arrays() {
 }
 
 static void prepare_plot_ir_data(int N, int sampling_factor) {
-    qDebug() << "Prepare plot data: N: " << N << ", sampling factor: " << sampling_factor;
+    const int N_plot = N / sampling_factor;
+    qDebug() << "Prepare plot: data size: N: " << N << ", sampling factor: " << sampling_factor << ", N for plot: " << N_plot;
     noise_generator->SetIirSettings(opt::g_iir_settings);
     const auto& seq_1_2 = noise_generator->CalculateSequence_1_2(N, sampling_factor);
     opt::maxY = -std::numeric_limits<my_float>::max();
     opt::minY = std::numeric_limits<my_float>::max();
     opt::g_data_1->clear();
     opt::g_data_2->clear();
-    my_float t = 0;
-    const int N_plot = N / sampling_factor;
+    qreal t = 0;
     for (int i = 0; i < N_plot; ++i) {
-        const my_float input = i*sampling_factor == 0;
-        const my_float sample = noise_generator->NextSample(input);
+        const qreal input = i*sampling_factor == 0;
+        const qreal sample = noise_generator->NextSample(input);
         for (int k = 1; k < sampling_factor; ++k) {
-            const my_float input = (i*sampling_factor + k) == 0;
+            const qreal input = (i*sampling_factor + k) == 0;
             noise_generator->NextSample(input);
         }
-        const my_float sample_Y = 20 * std::log10(std::abs(sample));
-        const my_float exact_Y = 20 * std::log10(seq_1_2.at(i));
+        const qreal sample_Y = 20 * std::log10(std::abs(sample));
+        const qreal exact_Y = 20 * std::log10(seq_1_2.at(i));
         opt::maxY = std::max(sample_Y, opt::maxY);
         opt::maxY = std::max(exact_Y, opt::maxY);
         opt::minY = std::min(sample_Y, opt::minY);
@@ -190,10 +198,15 @@ Widget::Widget(QWidget *parent)
                                         .mCoeffs = {1., -9./8., 145./128.}};
     noise_generator->SetIirSettings(iir_settings);
     opt::g_iir_settings = iir_settings;
+    opt::dc_offset_1_settings.mAlpha1_complement = ui->spbx_alpha_1->value() * 1.e-6;
+    opt::dc_offset_1_settings.mAlpha2_complement = ui->spbx_alpha_2->value() * 1.e-6;
+    opt::dc_offset_1_settings.mEpsilon = ui->spbx_epsilon->value() * 1.e-9;
+    noise_generator->SetDCoffsetSettings_1(opt::dc_offset_1_settings);
     qDebug() << "Size of my float: " << sizeof(my_float);
     if (std::is_same_v<my_float, float>) {
         fft::len_fft = prepare_fft(N_samples);
         allocate_fft_arrays(fft::len_fft);
+        calculate_exact_spm(fft::len_fft/2);
         qDebug() << "FFT prepared: len: " << fft::len_fft;
     }
 
@@ -252,7 +265,7 @@ void Widget::updatePlot()
 {
     static QVector<QPointF> data;
     data.clear();
-    my_float t = 0;
+    qreal t = 0.;
     for (int i = 0; i < N_samples; ++i) {
         const my_float input = rng::gauss_distribution(rng::rnd_generator);
         const my_float sample = noise_generator->NextSample(input);
@@ -272,17 +285,18 @@ void Widget::updatePlot()
             fft::_in[k].imag(0);
         }
         fft::g_fft->c2cfft(fft::_in, fft::_out);
-        my_float f = 0;
+        qreal frequency_index = 0;
         fft::spm->resize(fft::len_fft/2);
-        my_float* spm = fft::spm->data();
+        qreal* spm = fft::spm->data();
         for(int k = 0; k < fft::len_fft/2; ++k) {
             // Усреднение квадратов амплитуд: экспоненциальным фильтром для простоты.
-            const my_float Am2 = 2*(fft::_out[k].real() * fft::_out[k].real() + fft::_out[k].imag() * fft::_out[k].imag())/fft::len_fft;
-            *spm = *spm * my_float(0.995) + my_float(1. - 0.995) * Am2;
-            spm_dB.emplace_back(f++, 10 * std::log10(*spm));
+            const qreal Am2 = 2. * (fft::_out[k].real() * fft::_out[k].real() + fft::_out[k].imag() * fft::_out[k].imag()) / fft::len_fft;
+            *spm = *spm * qreal(0.992) + qreal(1. - 0.992) * Am2;
+            spm_dB.emplace_back(frequency_index++, 10 * std::log10(*spm));
             spm++;
         }
         fft::plotter->setCurveData(0, spm_dB);
+        fft::plotter->setCurveData(1, *fft::spm_exact);
         fft::plotter->show();
     }
 }
@@ -444,3 +458,26 @@ void Widget::on_btn_plot_ir_clicked()
     g_watcher_plot.setFuture(future);
 }
 
+
+void Widget::on_spbx_alpha_1_editingFinished()
+{
+    opt::dc_offset_1_settings.mAlpha1_complement = ui->spbx_alpha_1->value() * 1.e-6;
+    noise_generator->SetDCoffsetSettings_1(opt::dc_offset_1_settings);
+    qDebug() << "Set alpha1: " << (1. - opt::dc_offset_1_settings.mAlpha1_complement);
+}
+
+
+void Widget::on_spbx_alpha_2_editingFinished()
+{
+    opt::dc_offset_1_settings.mAlpha2_complement = ui->spbx_alpha_2->value() * 1.e-6;
+    noise_generator->SetDCoffsetSettings_1(opt::dc_offset_1_settings);
+    qDebug() << "Set alpha2: " << (1. - opt::dc_offset_1_settings.mAlpha2_complement);
+}
+
+
+void Widget::on_spbx_epsilon_editingFinished()
+{
+    opt::dc_offset_1_settings.mEpsilon = ui->spbx_epsilon->value() * 1.e-9;
+    noise_generator->SetDCoffsetSettings_1(opt::dc_offset_1_settings);
+    qDebug() << "Set epsilon: " << opt::dc_offset_1_settings.mEpsilon;
+}

@@ -11,7 +11,7 @@ constexpr int NUM_OF_IIRS = 3;
  * @brief Количество отсчетов на который применяется коррекция
  * паразитного DC offset, и так далее кратно этому размеру.
  */
-constexpr size_t DC_OFFSET_N = 1ull << 22;
+constexpr size_t DC_OFFSET_N = 1ull << 24;
 
 /**
  * @brief Параметры БИХ-фильтра, приближенно генерирующего ИХ "3/2".
@@ -23,6 +23,20 @@ struct IirSettings {
     T mTau[NUM_OF_IIRS]; // Параметр-масштаб, как правило в районе 1...5.
     T mPowers[NUM_OF_IIRS]; // Степень p аппроксимируемого закона (1/n)^p.
     T mCoeffs[NUM_OF_IIRS]; // Коэффициенты разложения ИХ "3/2" в ряд по большому индексу n.
+};
+
+/**
+ * @brief Настройки фильтра-корректора DC offset 1.
+ * K(z) = epsilon/(1 - alpha1 * z^-1) - epsilon/(1 - alpha2 * z^-1).
+ */
+template <typename T>
+struct DCoffsetSettings {
+    T mAlpha1_complement; // Дополненный до единицы коэффициент геометрической прогрессии 1.
+    T mAlpha2_complement; // Дополненный до единицы коэффициент геометрической прогрессии 2.
+    T mEpsilon; // Усиление.
+    // ac = 1 - a = 2E-6
+    // ac = 1 - a = 4E-6
+    // ε = 3.36750E-9
 };
 
 /**
@@ -61,6 +75,12 @@ public:
      * @param on Вкл/выкл.
      */
     void SetDCoffsetCorrection_2(bool on);
+
+    /**
+     * @brief SetDCoffsetSettings_1 Установить параметры фильтра-корректора DC offset 1.
+     * @param settings Настройки.
+     */
+    void SetDCoffsetSettings_1(DCoffsetSettings<T> settings);
 
     /**
      * @brief Получить статус коррекции DC offset 1.
@@ -138,6 +158,11 @@ private:
     T mCorrector[2] = {1., 1.};
 
     /**
+     * @brief Настройки фильтра-корректора DC offset 1.
+     */
+    DCoffsetSettings<T> mDCoffsetSettings_1;
+
+    /**
      * @brief Предыдущий отсчет. Вспомогательная переменная.
      */
     T mPrevSample = 0;
@@ -170,7 +195,7 @@ private:
     /**
      * @brief Сбросить состояния и пересчитать требуемые ИХ.
      */
-    void Update();
+    void ResetAll();
 };
 
 template class NoiseGenerator<float>;

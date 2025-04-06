@@ -1,9 +1,10 @@
 #include "noisegenerator.h"
 #include <cmath>
+#include <qdebug.h>
 
 template <typename T>
 NoiseGenerator<T>::NoiseGenerator(int fir_order): mFirOrder(fir_order) {
-    Update();
+    ResetAll();
 }
 
 template<typename T>
@@ -43,10 +44,9 @@ T NoiseGenerator<T>::NextSample(T input)
     iir_output /= norma;
     // DC offset 1 коррекция.
     if (mMakeDCoffsetCorrection_1) {
-        constexpr T epsilon = 1.685e-9; // Остаточный DC offset: -130 дБ vs -64 дБ.
-        iir_output += (mCorrector[0] - mCorrector[1])*epsilon;
-        mCorrector[0] -= mCorrector[0]*T(1.e-6);
-        mCorrector[1] -= mCorrector[1]*T(2.e-6);
+        iir_output += (mCorrector[0] - mCorrector[1]) * mDCoffsetSettings_1.mEpsilon;
+        mCorrector[0] -= mCorrector[0] * mDCoffsetSettings_1.mAlpha1_complement;
+        mCorrector[1] -= mCorrector[1] * mDCoffsetSettings_1.mAlpha2_complement;
     }
     //
     for (int i = mFirOrder - 1; i > 0; --i) {
@@ -56,16 +56,18 @@ T NoiseGenerator<T>::NextSample(T input)
     for (int i = 0; i < mFirOrder; ++i) {
         iir_output += mFirCoeffs[i] * mFirState[i];
     }
-    T output = mPrevSample + T(1) * input - T(1)/T(2) * mPrevFilters;
+    const T output = mPrevSample + T(1) * input - T(1)/T(2) * mPrevFilters;
     mPrevSample = output;
     mPrevFilters = iir_output;
-    mDCoffset += output;
-    mSampleCounter++;
-    if (mMakeDCoffsetCorrection_2 && ((mSampleCounter % DC_OFFSET_N) == 0)) {
+    if (mMakeDCoffsetCorrection_2) {
+        mDCoffset += mPrevSample;
+        mSampleCounter++;
+    }
+    if (mMakeDCoffsetCorrection_2 && (mSampleCounter == DC_OFFSET_N)) {
         mDCoffset /= T(DC_OFFSET_N);
-        // qDebug() << "DC offset: " << mDCoffset;
+        qDebug() << "DC offset: " << mDCoffset;
         mPrevSample -= mDCoffset; // Коррекция накопленного паразитного смещения.
-        mDCoffset = 0;
+        mDCoffset = 0; // Сброс.
         mSampleCounter = 0;
     }
     return output;
@@ -75,6 +77,8 @@ template<typename T>
 void NoiseGenerator<T>::SetDCoffsetCorrection_1(bool on)
 {
     mMakeDCoffsetCorrection_1 = on;
+    mCorrector[0] = 1.;
+    mCorrector[1] = 1.;
 }
 
 template<typename T>
@@ -92,6 +96,14 @@ void NoiseGenerator<T>::SetDCoffsetCorrection_2(bool on)
 }
 
 template<typename T>
+void NoiseGenerator<T>::SetDCoffsetSettings_1(DCoffsetSettings<T> settings)
+{
+    mDCoffsetSettings_1 = settings;
+    mCorrector[0] = 1.;
+    mCorrector[1] = 1.;
+}
+
+template<typename T>
 bool NoiseGenerator<T>::GetDCoffsetCorrectionStatus_2() const
 {
     return mMakeDCoffsetCorrection_2;
@@ -103,7 +115,7 @@ QVector<T> NoiseGenerator<T>::CalculateSequence_3_2(int len)
     QVector<T> result{1};
     double prev_value = result.at(0);
     for (int i = 1; i < len; ++i) {
-        const double value = prev_value * (1. - 1.5/(i + 1.));
+        const double value = prev_value - prev_value * 1.5/(i + 1.);
         prev_value = value;
         result.push_back(value);
     }
@@ -116,7 +128,7 @@ QVector<T> NoiseGenerator<T>::CalculateSequence_1_2(int len, int sampling_factor
     QVector<T> result{1};
     double prev_value = result.at(0);
     for (int i = 1; i < len; ++i) {
-        const double value = prev_value * (1. - 0.5/(i + 0.));
+        const double value = prev_value - prev_value * 0.5/(i + 0.);
         prev_value = value;
         if ((sampling_factor == 0) || (sampling_factor > 0 && i % sampling_factor == 0)) {
             result.push_back(value);
@@ -142,7 +154,7 @@ template<typename T>
 void NoiseGenerator<T>::SetIirSettings(IirSettings<T> settings)
 {
     mIirSettings = settings;
-    Update();
+    ResetAll();
 }
 
 template<typename T>
@@ -152,14 +164,14 @@ IirSettings<T> NoiseGenerator<T>::GetIirSettings() const
 }
 
 template<typename T>
-void NoiseGenerator<T>::Update()
+void NoiseGenerator<T>::ResetAll()
 {
-    mSampleCounter = 0;
     mCorrector[0] = 1.;
     mCorrector[1] = 1.;
+    mSampleCounter = 0;
+    mDCoffset = 0;
     mPrevSample = 0;
     mPrevFilters = 0;
-    mDCoffset = 0;
     const auto& c_3_2_exact = CalculateSequence_3_2(mFirOrder);
     int iir_order = std::accumulate(mIirSettings.mR, mIirSettings.mR + NUM_OF_IIRS, 0);
     mIirState.resize(iir_order); mIirState.fill(1);
