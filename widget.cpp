@@ -5,37 +5,37 @@
 #include "utils.h"
 #include <QVector>
 #include <QTimer>
-#include <random>
 #include <QFutureWatcher>
 #include <QtConcurrent/QtConcurrentRun>
+#include <random> // std::seed_seq
 #include "rfft.h"
 #include "cpuid.h"
+#include "rng2.h"
+#include "quasi_gauss.h"
 
 using my_float = float;
 
+namespace {
+namespace plot {
 /**
  * @brief Для отображения на графиках.
  */
-constexpr int N_samples = 8192;
+const int N_samples = 8192;
 
 /**
  * @brief Фактор прореживания отсчетов для менее затратной отрисовки оптимизированных ИХ.
  */
-constexpr int sampling_factor_plot = 64;
-
-/**
- * @brief Для оптимизации формы ИХ фильтра.
- */
-constexpr int N_opt = N_samples * sampling_factor_plot;
+const int sampling_factor = 64;
 
 Q_GLOBAL_STATIC(Plotter, plotter);
-
+}
+}
 /**
  * @brief Генератор шума. Параметр конструктора - порядок КИХ-фильтра.
  */
 Q_GLOBAL_STATIC(NoiseGenerator<my_float>, noise_generator, (8));
 
-Q_GLOBAL_STATIC(QTimer, timer);
+Q_GLOBAL_STATIC(QTimer, g_timer);
 
 namespace {
 namespace fft {
@@ -50,11 +50,7 @@ namespace fft {
 }
 
 namespace {
-namespace rng {
-    std::random_device rd{};
-    std::mt19937 rnd_generator{rd()};
-    std::normal_distribution<my_float> gauss_distribution{0.0, 1.0};
-}
+    rng2::gens g_gen;
 }
 
 static QFutureWatcher<void> g_watcher;
@@ -68,6 +64,10 @@ std::atomic<bool> g_optimization_failed;
 
 namespace {
 namespace opt {
+    /**
+     * @brief Для оптимизации формы ИХ фильтра.
+     */
+    const int N_opt = plot::N_samples * plot::sampling_factor;
     IirSettings<my_float> g_iir_settings;
     Q_GLOBAL_STATIC(QVector<QPointF>, g_data_1);
     Q_GLOBAL_STATIC(QVector<QPointF>, g_data_2);
@@ -177,13 +177,25 @@ static void plot_ir() {
     qDebug() << "Min, Max Y: " << opt::minY << ", " << opt::maxY;
     plotter_utils::AdjustY(settings, opt::minY, opt::maxY);
     qDebug() << "Adjusted: " << opt::minY << ", " << opt::maxY;
-    plotter->setWindowTitle("Impulse Responses, IR");
-    plotter->setPlotSettings(settings);
-    plotter->clearCurves();
-    plotter->setCurveData(0, *opt::g_data_1);
-    plotter->setCurveData(1, *opt::g_data_2);
-    plotter->show();
+    plot::plotter->setWindowTitle("Impulse Responses, IR");
+    plot::plotter->setPlotSettings(settings);
+    plot::plotter->clearCurves();
+    plot::plotter->setCurveData(0, *opt::g_data_1);
+    plot::plotter->setCurveData(1, *opt::g_data_2);
+    plot::plotter->show();
 }
+
+static auto get_random_u32x4(int64_t offset) {
+    const int64_t since_epoch_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>
+        (std::chrono::system_clock::now().time_since_epoch()).count();
+    std::seed_seq g_rnd_sequence{since_epoch_ms & 255, (since_epoch_ms >> 8) & 255,
+                                 (since_epoch_ms >> 16) & 255, (since_epoch_ms >> 24) & 255, offset};
+    lfsr8::u32x4 st;
+    g_rnd_sequence.generate(st.begin(), st.end());
+    return st;
+}
+
 
 Widget::Widget(QWidget *parent)
     : QWidget(parent)
@@ -204,15 +216,15 @@ Widget::Widget(QWidget *parent)
     noise_generator->SetDCoffsetSettings_1(opt::dc_offset_1_settings);
     qDebug() << "Size of my float: " << sizeof(my_float);
     if (std::is_same_v<my_float, float>) {
-        fft::len_fft = prepare_fft(N_samples);
+        fft::len_fft = prepare_fft(plot::N_samples);
         allocate_fft_arrays(fft::len_fft);
         calculate_exact_spm(fft::len_fft/2);
         qDebug() << "FFT prepared: len: " << fft::len_fft;
     }
-
+    g_gen.seed(get_random_u32x4(273));
     connect(&g_watcher, &QFutureWatcher<void>::finished, this, &Widget::optimizationFinished);
     connect(&g_watcher_plot, &QFutureWatcher<void>::finished, this, &Widget::plotIrFinished);
-    connect(timer, &QTimer::timeout, this, &Widget::updatePlot);
+    connect(g_timer, &QTimer::timeout, this, &Widget::updatePlot);
 }
 
 Widget::~Widget()
@@ -221,12 +233,12 @@ Widget::~Widget()
 }
 
 void Widget::closeEvent(QCloseEvent* event) {
-    timer->stop();
+    g_timer->stop();
     free_fft_arrays();
     if (std::is_same_v<my_float, float>) {
         fft::plotter->close();
     }
-    plotter->close();
+    plot::plotter->close();
 }
 
 void Widget::on_btn_plot_clicked()
@@ -250,15 +262,15 @@ void Widget::on_btn_plot_clicked()
     qDebug() << "DC offset 2: " << (noise_generator->GetDCoffsetCorrectionStatus_2() ? "On" : "Off");
     PlotSettings settings;
     settings.minX = 0;
-    settings.maxX = N_samples;
+    settings.maxX = plot::N_samples;
     settings.numXTicks = 8;
     settings.minY = -20;
     settings.maxY = 20;
     settings.numYTicks = 4;
-    plotter->setWindowTitle("Pink Noise");
-    plotter->setPlotSettings(settings);
-    plotter->clearCurves();
-    timer->start(g_update_interval_ms);
+    plot::plotter->setWindowTitle("Pink Noise");
+    plot::plotter->setPlotSettings(settings);
+    plot::plotter->clearCurves();
+    g_timer->start(g_update_interval_ms);
 }
 
 void Widget::updatePlot()
@@ -266,21 +278,21 @@ void Widget::updatePlot()
     static QVector<QPointF> data;
     data.clear();
     qreal t = 0.;
-    for (int i = 0; i < N_samples; ++i) {
-        const my_float input = rng::gauss_distribution(rng::rnd_generator);
+    for (int i = 0; i < plot::N_samples; ++i) {
+        const my_float input = 3.36*qgauss::GetQuasiGaussSample<my_float>(g_gen);
         const my_float sample = noise_generator->NextSample(input);
         data.emplace_back(t++, sample);
     }
-    plotter->setCurveData(0, data);
-    plotter->show();
+    plot::plotter->setCurveData(0, data);
+    plot::plotter->show();
     if (std::is_same_v<my_float, float>) {
         static QVector<QPointF> spm_dB;
         spm_dB.clear();
-        for(int k = 0; k < N_samples; ++k) {
+        for(int k = 0; k < plot::N_samples; ++k) {
             fft::_in[k].real(data.at(k).y());
             fft::_in[k].imag(0);
         }
-        for(int k = 0; k < (fft::len_fft - N_samples); ++k) {
+        for(int k = 0; k < (fft::len_fft - plot::N_samples); ++k) {
             fft::_in[k].real(0);
             fft::_in[k].imag(0);
         }
@@ -304,7 +316,7 @@ void Widget::updatePlot()
 void Widget::on_btn_stop_clicked()
 {
     qDebug() << "stopping...";
-    timer->stop();
+    g_timer->stop();
     if (g_watcher.isRunning()) {
         g_stop_optimization.store(true);
         g_watcher.waitForFinished();
@@ -326,7 +338,7 @@ static void optimize() {
     double sum_error = 0.;
     double sum_error_c = 0.;
     const double dp = 0.001; // parameter step.
-    const auto& seq_1_2 = noise_generator->CalculateSequence_1_2(N_opt);
+    const auto& seq_1_2 = noise_generator->CalculateSequence_1_2(opt::N_opt);
     auto calculate_error = [&seq_1_2](int n) -> double {
         double result = 0;
         for (int j = 0; j < n; ++j) {
@@ -337,14 +349,14 @@ static void optimize() {
         }
         return result / double(n);
     };
-    qDebug() << "Run optimization: N: " << N_opt << " samples";
+    qDebug() << "Run optimization: N: " << opt::N_opt << " samples";
     const int num_of_iters = 5;
     for (int iterations = 0; iterations < num_of_iters ; iterations++) {
         qDebug() << "Iterations: " << iterations << " from " << (num_of_iters-1);
         for (int s = 0; s < NUM_OF_IIRS; ++s) {
             qDebug() << "IIR filter index: " << s << " from " << (NUM_OF_IIRS-1);
             noise_generator->SetIirSettings(iir_settings);
-            sum_error = calculate_error(N_opt);
+            sum_error = calculate_error(opt::N_opt);
             auto& parameter_reference = iir_settings.mTau[s];
             my_float direction = 1;
             for (int repeat = 0; repeat < 4; ) {
@@ -354,7 +366,7 @@ static void optimize() {
                 }
                 parameter_reference += direction*dp;
                 noise_generator->SetIirSettings(iir_settings);
-                sum_error_c = calculate_error(N_opt);
+                sum_error_c = calculate_error(opt::N_opt);
                 if (sum_error_c >= sum_error) {
                     parameter_reference -= direction*dp;
                     direction = -direction;
@@ -376,7 +388,7 @@ static void optimize() {
 
 void Widget::on_btn_optimize_clicked()
 {
-    timer->stop();
+    g_timer->stop();
     ui->btn_plot->setEnabled(false);
     ui->btn_plot_ir->setEnabled(false);
     ui->btn_optimize->setEnabled(false);
@@ -397,10 +409,10 @@ void Widget::on_btn_optimize_clicked()
 void Widget::on_spbx_update_interval_editingFinished()
 {
     const auto tmp_interval = ui->spbx_update_interval->value();
-    if (timer->isActive() && tmp_interval != g_update_interval_ms) {
+    if (g_timer->isActive() && tmp_interval != g_update_interval_ms) {
         g_update_interval_ms = tmp_interval;
-        timer->stop();
-        timer->start(g_update_interval_ms);
+        g_timer->stop();
+        g_timer->start(g_update_interval_ms);
         qDebug() << "Apply new update interval";
     }
 }
@@ -425,7 +437,7 @@ void Widget::optimizationFinished()
     }
     {
         noise_generator->SetDCoffsetCorrection_2(false);
-        prepare_plot_ir_data(N_opt, sampling_factor_plot);
+        prepare_plot_ir_data(opt::N_opt, plot::sampling_factor);
         plot_ir();
         noise_generator->SetDCoffsetCorrection_2(true);
     }

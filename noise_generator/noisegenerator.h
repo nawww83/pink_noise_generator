@@ -11,7 +11,7 @@ constexpr int NUM_OF_IIRS = 3;
  * @brief Количество отсчетов на который применяется коррекция
  * паразитного DC offset, и так далее кратно этому размеру.
  */
-constexpr size_t DC_OFFSET_N = 1ull << 24;
+constexpr size_t DC_OFFSET_N = 1ull << 21;
 
 /**
  * @brief Параметры БИХ-фильтра, приближенно генерирующего ИХ "3/2".

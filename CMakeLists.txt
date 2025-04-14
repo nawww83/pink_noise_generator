@@ -10,9 +10,9 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 if (MSVC)
-    add_compile_options(/arch:AVX2)
+    add_compile_options(/arch:SSE4.2)
 else ()
-    add_compile_options(-mavx2)
+    add_compile_options(-msse4.1)
 endif ()
 
 find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets)
@@ -21,12 +21,13 @@ find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets)
 set(FFT_DIR rfft)
 set(PLOTTER_DIR plotter)
 set(PLOTTER_SRC ${PLOTTER_DIR}/plotter.cpp ${PLOTTER_DIR}/plotter.qrc)
-
+set(PRNG_DIR prng)
 set(NOISE_GEN_DIR noise_generator)
 set(NOISE_GEN_SRC ${NOISE_GEN_DIR}/noisegenerator.cpp ${NOISE_GEN_DIR}/noisegenerator.h)
 set(FFT_SRC ${FFT_DIR}/rfft.cpp ${FFT_DIR}/rfft.h ${FFT_DIR}/cpuid.h)
+set(PRNG_SRC ${PRNG_DIR}/lfsr.h ${PRNG_DIR}/rng2.h ${PRNG_DIR}/quasi_gauss.h)
 
-INCLUDE_DIRECTORIES(${PLOTTER_DIR} ${NOISE_GEN_DIR} ${FFT_DIR})
+INCLUDE_DIRECTORIES(${PLOTTER_DIR} ${NOISE_GEN_DIR} ${FFT_DIR} ${PRNG_DIR})
 
 set(PROJECT_SOURCES
         main.cpp
@@ -36,6 +37,7 @@ set(PROJECT_SOURCES
         ${PLOTTER_SRC}
         ${NOISE_GEN_SRC}
         ${FFT_SRC}
+        ${PRNG_SRC}
 )
 
 if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)

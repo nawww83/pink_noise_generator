@@ -65,7 +65,7 @@ T NoiseGenerator<T>::NextSample(T input)
     }
     if (mMakeDCoffsetCorrection_2 && (mSampleCounter == DC_OFFSET_N)) {
         mDCoffset /= T(DC_OFFSET_N);
-        qDebug() << "DC offset: " << mDCoffset;
+        qDebug() << "Make DC offset correction by " << mDCoffset;
         mPrevSample -= mDCoffset; // Коррекция накопленного паразитного смещения.
         mDCoffset = 0; // Сброс.
         mSampleCounter = 0;
