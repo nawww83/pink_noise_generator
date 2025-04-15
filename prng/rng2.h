@@ -1,13 +1,14 @@
 #pragma once
 
 /*
-Simplified Random numbers generator with ~64 bit period.
+Simplified Random numbers generator with ~2^64 period.
 */
 
 #include "lfsr.h"
 
 #include <utility>
 #include <cmath>
+#include <array>
 
 namespace rng2 {
 
@@ -51,6 +52,20 @@ inline STATE operator%(const STATE& x, u32 p) {
 inline void operator%=(STATE& x, u32 p) {
     for (int i=0; i<m; ++i) {
         x[i] %= p;
+    }
+}
+
+inline STATE operator/(const STATE& x, u32 p) {
+    STATE st;
+    for (int i=0; i<m; ++i) {
+        st[i] = x[i] / p;
+    }
+    return st;
+}
+
+inline void operator/=(STATE& x, u32 p) {
+    for (int i=0; i<m; ++i) {
+        x[i] /= p;
     }
 }
 
@@ -99,7 +114,6 @@ public:
     }
     std::array<u16, 4> next() {
         std::array<u16, 4> x;
-        STATE mSt;
         for (int i=0; i<4; ++i) { // 16*4 bits
             gp1.next(x2);
             gp2.next(x1);
@@ -109,17 +123,24 @@ public:
             x2 = gp2.get_cell(j1);
             x3 = gp3.get_cell(i2);
             x4 = gp4.get_cell(j2);
-            mSt = gp1.get_state() ^ gp2.get_state();
-            mSt ^= gp3.get_state() ^ gp4.get_state();
+            auto mSt = gp1.get_state();
+            mSt ^= gp2.get_state();
+            mSt ^= gp3.get_state();
+            mSt ^= gp4.get_state();
+            const auto high_bits = mSt / 16;
             mSt %= 16;
             x[i] <<= 4;
             x[i] |= mSt[0];
-            x[i] <<= 4;
-            x[i] |= mSt[3];
-            x[i] <<= 4;
-            x[i] |= mSt[1];
+            x[i] ^= high_bits[1];
             x[i] <<= 4;
             x[i] |= mSt[2];
+            x[i] ^= high_bits[0];
+            x[i] <<= 4;
+            x[i] |= mSt[3];
+            x[i] ^= high_bits[2];
+            x[i] <<= 4;
+            x[i] |= mSt[1];
+            x[i] ^= high_bits[3];
         }
         return x;
     }
