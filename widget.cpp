@@ -28,6 +28,8 @@ const int N_samples = 8192;
 const int sampling_factor = 64;
 
 Q_GLOBAL_STATIC(Plotter, plotter);
+
+QSize old_size = {0, 0};
 }
 }
 /**
@@ -41,6 +43,7 @@ namespace {
 namespace fft {
     Rfft* g_fft = nullptr;
     Q_GLOBAL_STATIC(Plotter, plotter);
+    bool is_activated = false;
     int len_fft = 0;
     data_t* _in = nullptr;
     data_t* _out = nullptr;
@@ -219,7 +222,10 @@ Widget::Widget(QWidget *parent)
         fft::len_fft = prepare_fft(plot::N_samples);
         allocate_fft_arrays(fft::len_fft);
         calculate_exact_spm(fft::len_fft/2);
+        ui->chk_bx_show_psd->setEnabled(true);
         qDebug() << "FFT prepared: len: " << fft::len_fft;
+    } else {
+        ui->chk_bx_show_psd->setEnabled(false);
     }
     g_gen.seed(get_random_u32x4(273));
     connect(&g_watcher, &QFutureWatcher<void>::finished, this, &Widget::optimizationFinished);
@@ -270,6 +276,9 @@ void Widget::on_btn_plot_clicked()
     plot::plotter->setWindowTitle("Pink Noise");
     plot::plotter->setPlotSettings(settings);
     plot::plotter->clearCurves();
+    if (plot::old_size != QSize(0, 0)) {
+        plot::plotter->resize(plot::old_size);
+    }
     g_timer->start(g_update_interval_ms);
 }
 
@@ -279,13 +288,13 @@ void Widget::updatePlot()
     data.clear();
     qreal t = 0.;
     for (int i = 0; i < plot::N_samples; ++i) {
-        const my_float input = 3.36*qgauss::GetQuasiGaussSample<my_float>(g_gen);
-        const my_float sample = noise_generator->NextSample(input);
+        const qreal input = 3.36*qgauss::GetQuasiGaussSample<my_float>(g_gen);
+        const qreal sample = noise_generator->NextSample(input);
         data.emplace_back(t++, sample);
     }
     plot::plotter->setCurveData(0, data);
     plot::plotter->show();
-    if (std::is_same_v<my_float, float>) {
+    if (std::is_same_v<my_float, float> && fft::is_activated) {
         static QVector<QPointF> spm_dB;
         spm_dB.clear();
         for(int k = 0; k < plot::N_samples; ++k) {
@@ -390,7 +399,8 @@ void Widget::on_btn_optimize_clicked()
 {
     g_timer->stop();
     ui->btn_plot->setEnabled(false);
-    ui->btn_plot_ir->setEnabled(false);
+    ui->frame_plot_ir->setEnabled(false);
+    ui->frame_dc_offset_1_parameters->setEnabled(false);
     ui->btn_optimize->setEnabled(false);
     g_optimization_failed.store(false);
     {
@@ -424,7 +434,8 @@ void Widget::optimizationFinished()
         noise_generator->SetDCoffsetCorrection_2(true);
         ui->btn_optimize->setEnabled(true);
         ui->btn_plot->setEnabled(true);
-        ui->btn_plot_ir->setEnabled(true);
+        ui->frame_plot_ir->setEnabled(true);
+        ui->frame_dc_offset_1_parameters->setEnabled(true);
         ui->btn_optimize->setText(g_label_optimize_button);
     }
     if (g_optimization_failed.load()) {
@@ -448,9 +459,10 @@ void Widget::plotIrFinished()
     plot_ir();
     ui->btn_plot_ir->setText(g_label_plot_ir_button);
     ui->btn_plot->setEnabled(true);
-    ui->btn_plot_ir->setEnabled(true);
     ui->btn_stop->setEnabled(true);
     ui->btn_optimize->setEnabled(true);
+    ui->frame_dc_offset_1_parameters->setEnabled(true);
+    ui->frame_plot_ir->setEnabled(true);
     noise_generator->SetDCoffsetCorrection_2(true);
 }
 
@@ -463,9 +475,10 @@ void Widget::on_btn_plot_ir_clicked()
     g_label_plot_ir_button = ui->btn_plot_ir->text();
     ui->btn_plot_ir->setText(QString::fromUtf8("Wait..."));
     ui->btn_stop->setEnabled(false);
-    ui->btn_plot_ir->setEnabled(false);
-    ui->btn_plot->setEnabled(false);
     ui->btn_optimize->setEnabled(false);
+    ui->btn_plot->setEnabled(false);
+    ui->frame_plot_ir->setEnabled(false);
+    ui->frame_dc_offset_1_parameters->setEnabled(false);
     QFuture<void> future = QtConcurrent::run(prepare_plot_ir_data, ui->spbx_ir_samples->value(), ui->spbx_sampling_factor_ir->value());
     g_watcher_plot.setFuture(future);
 }
@@ -493,3 +506,54 @@ void Widget::on_spbx_epsilon_editingFinished()
     noise_generator->SetDCoffsetSettings_1(opt::dc_offset_1_settings);
     qDebug() << "Set epsilon: " << opt::dc_offset_1_settings.mEpsilon;
 }
+
+void Widget::on_chk_bx_show_psd_stateChanged(int arg1)
+{
+    fft::is_activated = arg1 != 0;
+    qDebug() << "Show PSD: " << fft::is_activated;
+    if (!fft::is_activated) {
+        fft::plotter->close();
+    }
+}
+
+
+void Widget::on_btn_show_gauss_clicked()
+{
+    g_timer->stop();
+    if (plot::old_size == QSize(0, 0))
+        plot::old_size = plot::plotter->size();
+    PlotSettings settings;
+    settings.minX = -3;
+    settings.maxX = 3;
+    settings.numXTicks = 6;
+    settings.minY = -3;
+    settings.maxY = 3;
+    settings.numYTicks = 6;
+    plot::plotter->setWindowTitle("White Gauss noise");
+    plot::plotter->setPlotSettings(settings);
+    plot::plotter->clearCurves();
+    static QVector<QPointF> data;
+    static QVector<QPointF> circle;
+    static QVector<QPointF> origin;
+    data.clear();
+    circle.clear();
+    origin.clear();
+    for (int i = 0; i < 4096; i++) {
+        qreal sample_1 = 3*qgauss::GetQuasiGaussSample<my_float>(g_gen);
+        qreal sample_2 = 3*qgauss::GetQuasiGaussSample<my_float>(g_gen);
+        data.emplace_back(sample_1, sample_2);
+        qreal alpha = 2 * i * std::numbers::pi * 360./4096.;
+        qreal x = 2*std::cos(alpha);
+        qreal y = 2*std::sin(alpha);
+        circle.emplace_back(x, y);
+        qreal x0 = 0.03*std::cos(alpha);
+        qreal y0 = 0.03*std::sin(alpha);
+        origin.emplace_back(x0, y0);
+    }
+    plot::plotter->setCurveData(0, data);
+    plot::plotter->setCurveData(1, circle);
+    plot::plotter->setCurveData(2, origin);
+    plot::plotter->resize(600, 600);
+    plot::plotter->show();
+}
+

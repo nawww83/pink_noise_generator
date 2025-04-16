@@ -267,6 +267,35 @@
        </property>
       </widget>
      </widget>
+     <widget class="QCheckBox" name="chk_bx_show_psd">
+      <property name="geometry">
+       <rect>
+        <x>230</x>
+        <y>20</y>
+        <width>91</width>
+        <height>20</height>
+       </rect>
+      </property>
+      <property name="toolTip">
+       <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Показывать спектр.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+      </property>
+      <property name="text">
+       <string>Show PSD</string>
+      </property>
+     </widget>
+     <widget class="QPushButton" name="btn_show_gauss">
+      <property name="geometry">
+       <rect>
+        <x>280</x>
+        <y>50</y>
+        <width>75</width>
+        <height>24</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Gaussian</string>
+      </property>
+     </widget>
     </widget>
    </item>
   </layout>

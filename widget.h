@@ -43,6 +43,10 @@ private slots:
 
     void on_spbx_epsilon_editingFinished();
 
+    void on_chk_bx_show_psd_stateChanged(int arg1);
+
+    void on_btn_show_gauss_clicked();
+
 private:
     Ui::Widget *ui;
 };
