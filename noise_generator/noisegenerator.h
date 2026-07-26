@@ -198,5 +198,3 @@ private:
     void ResetAll();
 };
 
-template class NoiseGenerator<float>;
-template class NoiseGenerator<double>;

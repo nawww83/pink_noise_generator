@@ -8,6 +8,7 @@
 #include <QFutureWatcher>
 #include <QtConcurrent/QtConcurrentRun>
 #include <random> // std::seed_seq
+#include <numbers>
 #include "rfft.h"
 #include "cpuid.h"
 #include "rng2.h"
