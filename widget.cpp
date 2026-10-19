@@ -174,6 +174,10 @@ static void prepare_plot_ir_data(int N, int sampling_factor) {
 }
 
 static void plot_ir() {
+    if (opt::g_data_1->isEmpty() || opt::g_data_2->isEmpty()) {
+        qDebug() << "plot_ir: нет данных (ir_samples / sampling_factor = 0)";
+        return;
+    }
     PlotSettings settings;
     settings.minX = 0;
     settings.maxX = opt::g_data_1->last().rx();
@@ -303,8 +307,8 @@ void Widget::updatePlot()
             fft::_in[k].imag(0);
         }
         for(int k = 0; k < (fft::len_fft - plot::N_samples); ++k) {
-            fft::_in[k].real(0);
-            fft::_in[k].imag(0);
+            fft::_in[plot::N_samples + k].real(0);
+            fft::_in[plot::N_samples + k].imag(0);
         }
         fft::g_fft->c2cfft(fft::_in, fft::_out);
         qreal frequency_index = 0;
@@ -470,6 +474,15 @@ void Widget::plotIrFinished()
 void Widget::on_btn_plot_ir_clicked()
 {
     qDebug() << "Plot IR...";
+    const int ir_samples = ui->spbx_ir_samples->value();
+    const int sampling_factor_ir = ui->spbx_sampling_factor_ir->value();
+    if (ir_samples / sampling_factor_ir < 1) {
+        qDebug() << "Plot IR: sampling factor больше числа отсчетов, нечего строить";
+        return;
+    }
+    // Иначе UpdatePlot() из таймера и рабочий поток будут одновременно
+    // дергать noise_generator (гонка данных).
+    g_timer->stop();
     noise_generator->SetDCoffsetCorrection_2(false);
     qDebug() << "DC offset 1: " << (noise_generator->GetDCoffsetCorrectionStatus_1() ? "On" : "Off");
     qDebug() << "DC offset 2: " << (noise_generator->GetDCoffsetCorrectionStatus_2() ? "On" : "Off");
@@ -480,7 +493,7 @@ void Widget::on_btn_plot_ir_clicked()
     ui->btn_plot->setEnabled(false);
     ui->frame_plot_ir->setEnabled(false);
     ui->frame_dc_offset_1_parameters->setEnabled(false);
-    QFuture<void> future = QtConcurrent::run(prepare_plot_ir_data, ui->spbx_ir_samples->value(), ui->spbx_sampling_factor_ir->value());
+    QFuture<void> future = QtConcurrent::run(prepare_plot_ir_data, ir_samples, sampling_factor_ir);
     g_watcher_plot.setFuture(future);
 }
 
