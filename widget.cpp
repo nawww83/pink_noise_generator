@@ -210,7 +210,10 @@ Widget::Widget(QWidget *parent)
     , ui(new Ui::Widget)
 {
     ui->setupUi(this);
-    this->setFixedSize(this->size().width(), this->size().height());
+    // Размер из .ui (408x200) меньше минимума раскладки, и жесткая фиксация
+    // вдавливала содержимое: у спинбоксов текстовое поле становилось ниже
+    // шрифта и обрезались хвосты букв. Берем естественный размер раскладки.
+    this->setFixedSize(this->sizeHint());
     ui->spbx_update_interval->setValue(g_update_interval_ms);
     IirSettings<my_float> iir_settings {.mR = {21, 7, 5},
                                         .mTau = {3.933, 1.005, 1.},
