@@ -318,8 +318,11 @@ void Widget::updatePlot()
         fft::spm->resize(fft::len_fft/2);
         qreal* spm = fft::spm->data();
         for(int k = 0; k < fft::len_fft/2; ++k) {
+            // Односторонний спектр: бины 1..N/2-1 удваиваются, а DC (k = 0)
+            // и Найквист (k = N/2, здесь не строится) - нет.
+            const qreal one_sided = (k == 0) ? 1. : 2.;
             // Усреднение квадратов амплитуд: экспоненциальным фильтром для простоты.
-            const qreal Am2 = 2. * (fft::_out[k].real() * fft::_out[k].real() + fft::_out[k].imag() * fft::_out[k].imag()) / fft::len_fft;
+            const qreal Am2 = one_sided * (fft::_out[k].real() * fft::_out[k].real() + fft::_out[k].imag() * fft::_out[k].imag()) / fft::len_fft;
             *spm = *spm * qreal(0.992) + qreal(1. - 0.992) * Am2;
             spm_dB.emplace_back(frequency_index++, 10 * std::log10(*spm));
             spm++;
