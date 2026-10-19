@@ -33,6 +33,28 @@ using u16 = uint16_t;
 using u16x8 = std::array<u16, 8>;
 using u32x4 = std::array<u32, 4>;
 
+#ifdef USE_SSE
+/**
+ * @brief Векторное взятие остатка x % p для восьми 16-битных ячеек.
+ * @details Метод Барретта (m = floor(2^16 / p), q = (x*m) >> 16, res = x - q*p),
+ * как в проекте AllPass (utils/lfsr/lfsr.h). Корректно при 0 <= x < 2^16 и p < 256.
+ * Применяется только к произведениям, у которых оба сомножителя уже приведены
+ * по модулю p, поэтому x < p^2 < 2^16 и усечения нет.
+ */
+template <int p>
+inline __m128i simd_mod_p16(__m128i x) {
+    static_assert(p > 1);
+    static_assert(p < 256);
+    const __m128i m = _mm_set1_epi16(static_cast<short>((1u << 16) / p));
+    const __m128i p_vec = _mm_set1_epi16(static_cast<short>(p));
+    const __m128i q = _mm_mulhi_epu16(x, m);
+    __m128i res = _mm_sub_epi16(x, _mm_mullo_epi16(q, p_vec));
+    // Остаток после Барретта лежит в [0, 2p), достаточно одной коррекции.
+    const __m128i ge = _mm_cmpgt_epi16(res, _mm_set1_epi16(static_cast<short>(p - 1)));
+    return _mm_sub_epi16(res, _mm_and_si128(ge, p_vec));
+}
+#endif
+
 // https://stackoverflow.com/questions/24053582/change-member-typedef-depending-on-template-parameter
 template <int m>
 class MType {
@@ -125,101 +147,91 @@ public:
 
     /**
      * @brief Сделать шаг назад (один такт генератора). Обратно к next(input).
-     * @param input Входной символ (по модулю p), который подается
+     * @param inp Входной символ (по модулю p), который подается
      * на вход генератора.
+     * @details Реализация в стиле AllPass (utils/lfsr/lfsr.h): разность
+     * (m_state[0] - inp) приводится по модулю p ДО умножения на m_inv_K[0],
+     * поэтому произведение не превышает p^2 < 2^16 (ячейки u16, p < 256) и
+     * не усекается _mm_mullo_epi16. Раньше умножалось (state - inp + p) < 2p,
+     * произведение достигало 2*p^2 > 2^16 и молча усекалось, из-за чего
+     * коэффициент m_v был неверным при p > 181.
      */
     void back(SAMPLE inp=0) {
 #ifdef USE_SSE
         if constexpr (m > 4) {
-            __m128i mask1 = _mm_slli_si128(_mm_set1_epi16(-1), 2);
-            __m128i input = _mm_andnot_si128( mask1, _mm_set1_epi16(inp) );
-            __m128i state = _mm_andnot_si128( mask1, _mm_set1_epi16(m_state[0]) );
-            __m128i a = _mm_sub_epi16(state, input);
+            const __m128i m0 = _mm_setr_epi16(-1, 0, 0, 0, 0, 0, 0, 0);
+            const __m128i p_vec = _mm_set1_epi16(static_cast<short>(p));
+            const __m128i st = _mm_load_si128((const __m128i*)&m_state[0]);
 
-            __m128i prime = _mm_andnot_si128( mask1, _mm_set1_epi16(p) );
-            a = _mm_add_epi16(a, prime);
+            // d[0] = (state[0] - inp) mod p: т.к. state[0] < p и inp < p,
+            // вычитание по модулю 2^16 само достраивает +p.
+            __m128i d = _mm_and_si128(m0, st);
+            d = _mm_sub_epi16(d, _mm_and_si128(m0, _mm_set1_epi16(static_cast<short>(inp))));
+            d = simd_mod_p16<p>(_mm_add_epi16(d, _mm_and_si128(m0, p_vec)));
 
-            __m128i i_coeffs = _mm_load_si128((const __m128i*)&m_inv_K[0]);
-            a = _mm_mullo_epi16(a, i_coeffs);
-            a = _mm_add_epi16(a, _mm_slli_si128(a, 2));
-            a = _mm_add_epi16(a, _mm_slli_si128(a, 4));
-            a = _mm_add_epi16(a, _mm_slli_si128(a, 8));
-            {
-                alignas(16) u16x8 tmp;
-                _mm_store_si128((__m128i*)&tmp[0], a);
-                for (int i=0; i<m; ++i) {
-                    tmp[i] %= static_cast<SAMPLE>(p);
-                }
-                a = _mm_load_si128((const __m128i*)&tmp[0]);
-            }
-            __m128i mask = _mm_set_epi16(0, 0, 0, 0, 0, 0, 0, -1);
-            mask = _mm_slli_si128(mask, 2*(m-1));
-            mask = _mm_andnot_si128(mask, _mm_set1_epi16(-1));
+            // v = d * inv_K[0] mod p (сомножители < p, произведение < p^2 < 2^16).
+            __m128i v = simd_mod_p16<p>(_mm_mullo_epi16(d, _mm_load_si128((const __m128i*)&m_inv_K[0])));
+            v = _mm_shuffle_epi8(v, _mm_setr_epi8(0,1, 0,1, 0,1, 0,1, 0,1, 0,1, 0,1, 0,1));
 
-            __m128i d = _mm_load_si128((const __m128i*)&m_state[0]);
-            d = _mm_and_si128(mask, _mm_srli_si128(d, 2));
-
-            __m128i coeffs = _mm_load_si128((const __m128i*)&m_K[0]);
-            coeffs = _mm_and_si128(mask, _mm_srli_si128(coeffs, 2));
-
-            __m128i mask2 = _mm_set_epi16(0, 0, 0, 0, 0, 0, 0, -1);
-            mask2 = _mm_slli_si128(mask2, 2*(m-1));
-            coeffs = _mm_add_epi16(coeffs, mask2);
-
-            a = _mm_sub_epi16(d, _mm_mullo_epi16(a, coeffs));
-            a = _mm_add_epi16(a, _mm_and_si128(mask, _mm_set1_epi16(static_cast<SAMPLE>(p*p))));
-            _mm_store_si128((__m128i*)&m_state[0], a);
-            for (int i=0; i<m; ++i) {
-                m_state[i] %= static_cast<SAMPLE>(p);
-            }
+            // state[i] = (state[i+1] - v * K[i+1]) mod p, state[m-1] = v.
+            const __m128i next_st = _mm_srli_si128(st, 2);
+            const __m128i next_k = _mm_srli_si128(_mm_load_si128((const __m128i*)&m_K[0]), 2);
+            const __m128i prod = simd_mod_p16<p>(_mm_mullo_epi16(v, next_k));
+            __m128i res = _mm_sub_epi16(next_st, prod);
+            res = _mm_add_epi16(res, _mm_and_si128(_mm_cmpgt_epi16(_mm_setzero_si128(), res), p_vec));
+            res = _mm_blend_epi16(res, v, 1 << (m - 1));
+            _mm_store_si128((__m128i*)&m_state[0], res);
         } else {
-            __m128i mask1 = _mm_slli_si128(_mm_set1_epi32(-1), 4);
-            __m128i input = _mm_andnot_si128( mask1, _mm_set1_epi32(inp) );
-            __m128i state = _mm_andnot_si128( mask1, _mm_set1_epi32(m_state[0]) );
-            __m128i a = _mm_sub_epi32(state, input);
+            const __m128i m0 = _mm_setr_epi32(-1, 0, 0, 0);
+            const __m128i p_vec = _mm_set1_epi32(static_cast<int>(p));
+            const __m128i st = _mm_load_si128((const __m128i*)&m_state[0]);
 
-            __m128i prime = _mm_andnot_si128( mask1, _mm_set1_epi32(p) );
-            a = _mm_add_epi32(a, prime);
+            __m128i d = _mm_and_si128(m0, st);
+            d = _mm_sub_epi32(d, _mm_and_si128(m0, _mm_set1_epi32(static_cast<int>(inp))));
+            d = _mm_add_epi32(d, _mm_and_si128(m0, p_vec));
+            // d[0] < 2p < 2^17, приводим вычитанием p.
+            d = _mm_sub_epi32(d, _mm_and_si128(_mm_cmpgt_epi32(d, _mm_set1_epi32(static_cast<int>(p) - 1)), p_vec));
 
-            __m128i i_coeffs = _mm_load_si128((const __m128i*)&m_inv_K[0]);
-            a = _mm_mullo_epi32(a, i_coeffs);
-            a = _mm_add_epi32(a, _mm_slli_si128(a, 4));
-            a = _mm_add_epi32(a, _mm_slli_si128(a, 8));
+            // v = d * inv_K[0] mod p (сомножители < p, произведение < p^2 < 2^32).
+            __m128i v = _mm_mullo_epi32(d, _mm_load_si128((const __m128i*)&m_inv_K[0]));
             {
                 alignas(16) u32x4 tmp;
-                _mm_store_si128((__m128i*)&tmp[0], a);
-                for (int i=0; i<m; ++i) {
+                _mm_store_si128((__m128i*)&tmp[0], v);
+                for (int i=0; i<4; ++i) {
                     tmp[i] %= static_cast<SAMPLE>(p);
                 }
-                a = _mm_load_si128((const __m128i*)&tmp[0]);
+                v = _mm_load_si128((const __m128i*)&tmp[0]);
             }
-            __m128i mask = _mm_set_epi32(0, 0, 0, -1);
-            mask = _mm_slli_si128(mask, 4*(m-1));
-            mask = _mm_andnot_si128(mask, _mm_set1_epi32(-1));
+            v = _mm_shuffle_epi32(v, 0x00);
 
-            __m128i d = _mm_load_si128((const __m128i*)&m_state[0]);
-            d = _mm_and_si128(mask, _mm_srli_si128(d, 4));
-
-            __m128i coeffs = _mm_load_si128((const __m128i*)&m_K[0]);
-            coeffs = _mm_and_si128(mask, _mm_srli_si128(coeffs, 4));
-
-            __m128i mask2 = _mm_set_epi32(0, 0, 0, -1);
-            mask2 = _mm_slli_si128(mask2, 4*(m-1));
-            coeffs = _mm_add_epi32(coeffs, mask2);
-
-            a = _mm_sub_epi32(d, _mm_mullo_epi32(a, coeffs));
-            a = _mm_add_epi32(a, _mm_and_si128(mask, _mm_set1_epi32(static_cast<SAMPLE>(p*p))));
-            _mm_store_si128((__m128i*)&m_state[0], a);
-            for (int i=0; i<m; ++i) {
-                m_state[i] %= static_cast<SAMPLE>(p);
+            const __m128i next_st = _mm_srli_si128(st, 4);
+            const __m128i next_k = _mm_srli_si128(_mm_load_si128((const __m128i*)&m_K[0]), 4);
+            __m128i prod = _mm_mullo_epi32(v, next_k);
+            {
+                alignas(16) u32x4 tmp;
+                _mm_store_si128((__m128i*)&tmp[0], prod);
+                for (int i=0; i<4; ++i) {
+                    tmp[i] %= static_cast<SAMPLE>(p);
+                }
+                prod = _mm_load_si128((const __m128i*)&tmp[0]);
             }
+            __m128i res = _mm_sub_epi32(next_st, prod);
+            res = _mm_add_epi32(res, _mm_and_si128(_mm_cmpgt_epi32(_mm_setzero_si128(), res), p_vec));
+            res = _mm_blend_epi16(res, v, 3 << (2 * (m - 1)));
+            _mm_store_si128((__m128i*)&m_state[0], res);
         }
 #else
-        const SAMPLE m_v = (m_inv_K[0]*(m_state[0] - inp + static_cast<SAMPLE>(p))) % static_cast<SAMPLE>(p);
+        const u32 diff = (m_state[0] >= inp)
+            ? static_cast<u32>(m_state[0] - inp)
+            : static_cast<u32>(m_state[0]) - static_cast<u32>(inp) + static_cast<u32>(p);
+        const u32 m_v = (static_cast<u32>(m_inv_K[0]) * (diff % static_cast<u32>(p))) % static_cast<u32>(p);
         for (int i=0; i<m-1; i++) {
-            m_state[i] = (m_state[i+1] - m_v*m_K[i+1] + static_cast<SAMPLE>(p)*static_cast<SAMPLE>(p)) % static_cast<SAMPLE>(p);
+            const u32 subtrahend = (m_v * static_cast<u32>(m_K[i+1])) % static_cast<u32>(p);
+            int32_t res = static_cast<int32_t>(m_state[i+1]) - static_cast<int32_t>(subtrahend);
+            res += res < 0 ? static_cast<int32_t>(p) : 0;
+            m_state[i] = static_cast<SAMPLE>(res);
         }
-        m_state[m-1] = m_v;
+        m_state[m-1] = static_cast<SAMPLE>(m_v);
 #endif
     }
 
@@ -437,61 +449,59 @@ public:
      * @param inp1 Входной символ (по модулю p) первого генератора.
      * @param inp2 Входной символ (по модулю p) второго генератора.
      */
+    /**
+     * @brief Сделать шаг назад (один такт генератора). Обратно к next(inp1, inp2).
+     * @param inp1 Входной символ (по модулю p) первого генератора.
+     * @param inp2 Входной символ (по модулю p) второго генератора.
+     * @details Реализация в стиле AllPass: разности (state[0]-inp1) и (state[4]-inp2)
+     * приводятся по модулю p ДО умножения на обратные коэффициенты, поэтому все
+     * произведения меньше p^2 < 2^16 и _mm_mullo_epi16 их не усекает.
+     * Раньше умножалось (state - inp + p) < 2p, произведение достигало 2*p^2,
+     * и при p > 181 коэффициент m_v получался неверным.
+     */
     void back(u16 inp1, u16 inp2) {
 #ifdef USE_SSE
-        __m128i mask1 = _mm_slli_si128(_mm_set1_epi16(-1), 2);
-        const __m128i mask2 = _mm_set_epi16(-1, -1, -1, 0, -1, -1, -1, -1);
+        const __m128i p_vec = _mm_set1_epi16(static_cast<short>(p));
+        const __m128i st = _mm_load_si128((const __m128i*)&m_state[0]);
 
-        __m128i input = _mm_andnot_si128( mask1, _mm_set1_epi16(inp1) );
-        input = _mm_or_si128( input, _mm_andnot_si128( mask2, _mm_set1_epi16(inp2) ) );
+        // d = {state[0] - inp1 + p, 0,0,0, state[4] - inp2 + p, 0,0,0}.
+        // Т.к. state[i] < p и inp < p, вычитание по модулю 2^16 само достраивает +p.
+        __m128i d = _mm_sub_epi16(_mm_and_si128(st, _mm_setr_epi16(-1,0,0,0,-1,0,0,0)),
+                                  _mm_setr_epi16(static_cast<short>(inp1),0,0,0,static_cast<short>(inp2),0,0,0));
+        d = simd_mod_p16<p>(_mm_add_epi16(d, _mm_setr_epi16(static_cast<short>(p),0,0,0,static_cast<short>(p),0,0,0)));
 
-        __m128i state = _mm_andnot_si128( mask1, _mm_set1_epi16(m_state[0]) );
-        state = _mm_or_si128( state, _mm_andnot_si128( mask2, _mm_set1_epi16(m_state[4]) ) );
+        // v1 = d[0]*inv_K[0] mod p, v2 = d[4]*inv_K[4] mod p.
+        __m128i v = simd_mod_p16<p>(_mm_mullo_epi16(d, _mm_load_si128((const __m128i*)&m_inv_K[0])));
+        const u16 v1 = static_cast<u16>(_mm_extract_epi16(v, 0));
+        const u16 v2 = static_cast<u16>(_mm_extract_epi16(v, 4));
+        v = _mm_shuffle_epi8(v, _mm_setr_epi8(0,1, 0,1, 0,1, 0,1, 8,9, 8,9, 8,9, 8,9));
 
-        __m128i a = _mm_sub_epi16(state, input);
-
-        __m128i prime = _mm_andnot_si128( mask1, _mm_set1_epi16(p) );
-        prime = _mm_or_si128( prime, _mm_andnot_si128( mask2, _mm_set1_epi16(p) ) );
-
-        a = _mm_add_epi16(a, prime);
-
-        __m128i i_coeffs = _mm_load_si128((const __m128i*)&m_inv_K[0]);
-        a = _mm_mullo_epi16(a, i_coeffs);
-        a = _mm_add_epi16(a, _mm_slli_si128(a, 2));
-        a = _mm_add_epi16(a, _mm_slli_si128(a, 4));
-        {
-            alignas(16) u16x8 tmp;
-            _mm_store_si128((__m128i*)&tmp[0], a);
-            for (int i=0; i<8; ++i) {
-                tmp[i] %= static_cast<u16>(p);
-            }
-            a = _mm_load_si128((const __m128i*)&tmp[0]);
-            // a = _mm_set_epi16(m_v_2, m_v_2, m_v_2, m_v_2, m_v_1, m_v_1, m_v_1, m_v_1)
-        }
-
-        const __m128i mask = _mm_set_epi16(0, -1, -1, -1, 0, -1, -1, -1);
-        __m128i d = _mm_load_si128((const __m128i*)&m_state[0]);
-        d = _mm_and_si128(mask, _mm_srli_si128(d, 2));
-
-        __m128i coeffs = _mm_load_si128((const __m128i*)&m_K[0]);
-        coeffs = _mm_and_si128(mask, _mm_srli_si128(coeffs, 2));
-        coeffs = _mm_add_epi16(coeffs, _mm_set_epi16(-1, 0, 0, 0, -1, 0, 0, 0));
-
-        a = _mm_sub_epi16(d, _mm_mullo_epi16(a, coeffs));
-        a = _mm_add_epi16(a, _mm_and_si128(mask, _mm_set1_epi16(static_cast<u16>(p*p))));
-        _mm_store_si128((__m128i*)&m_state[0], a);
-        for (int i=0; i<8; ++i) {
-            m_state[i] %= static_cast<u16>(p);
-        }
+        // state[i] = (state[i+1] - v*K[i+1]) mod p; state[3] = v1, state[7] = v2.
+        const __m128i next_st = _mm_srli_si128(st, 2);
+        const __m128i next_k = _mm_srli_si128(_mm_load_si128((const __m128i*)&m_K[0]), 2);
+        const __m128i prod = simd_mod_p16<p>(_mm_mullo_epi16(v, next_k));
+        __m128i res = _mm_sub_epi16(next_st, prod);
+        res = _mm_add_epi16(res, _mm_and_si128(_mm_cmpgt_epi16(_mm_setzero_si128(), res), p_vec));
+        res = _mm_blend_epi16(res, _mm_setr_epi16(0,0,0,static_cast<short>(v1),0,0,0,static_cast<short>(v2)), 0x88);
+        _mm_store_si128((__m128i*)&m_state[0], res);
 #else
-        const u16 m_v_1 = (m_inv_K[0]*(m_state[0] - inp1 + static_cast<u16>(p))) % static_cast<u16>(p);
-        const u16 m_v_2 = (m_inv_K[4]*(m_state[4] - inp2 + static_cast<u16>(p))) % static_cast<u16>(p);
+        const u32 up = static_cast<u32>(p);
+        const u32 s0 = static_cast<u32>(m_state[0]);
+        const u32 s4 = static_cast<u32>(m_state[4]);
+        const u32 i1 = static_cast<u32>(inp1) % up;
+        const u32 i2 = static_cast<u32>(inp2) % up;
+        const u32 diff1 = (s0 >= i1) ? (s0 - i1) : (s0 + up - i1);
+        const u32 diff2 = (s4 >= i2) ? (s4 - i2) : (s4 + up - i2);
+        const u32 m_v_1 = (static_cast<u32>(m_inv_K[0]) * diff1) % up;
+        const u32 m_v_2 = (static_cast<u32>(m_inv_K[4]) * diff2) % up;
         for (int i=0; i<3; i++) {
-            m_state[i] = (m_state[i+1] - m_v_1*m_K[i+1] + static_cast<u16>(p*p)) % static_cast<u16>(p);
-            m_state[i+4] = (m_state[i+5] - m_v_2*m_K[i+5] + static_cast<u16>(p*p)) % static_cast<u16>(p);
+            const u32 a = (m_v_1 * static_cast<u32>(m_K[i+1])) % up;
+            const u32 b = (m_v_2 * static_cast<u32>(m_K[i+5])) % up;
+            m_state[i]   = static_cast<u16>((static_cast<u32>(m_state[i+1]) + up - a) % up);
+            m_state[i+4] = static_cast<u16>((static_cast<u32>(m_state[i+5]) + up - b) % up);
         }
-        m_state[3] = m_v_1;
-        m_state[7] = m_v_2;
+        m_state[3] = static_cast<u16>(m_v_1);
+        m_state[7] = static_cast<u16>(m_v_2);
 #endif
     }
 
