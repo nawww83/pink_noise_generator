@@ -167,6 +167,14 @@ IirSettings<T> NoiseGenerator<T>::GetIirSettings() const
 template<typename T>
 void NoiseGenerator<T>::ResetAll()
 {
+    for (int k = 0; k < NUM_OF_IIRS; ++k) {
+        // Блок фильтра вмещает 1 + 2*(mR[k]/2) ячеек, что в точности равно
+        // mR[k] только для нечетного mR[k]. При четном последняя итерация
+        // второй ветки (mIirState[j + offset + half]) пишет в ячейку
+        // следующего фильтра.
+        Q_ASSERT(mIirSettings.mR[k] % 2 == 1);
+        Q_ASSERT(mIirSettings.mR[k] >= 1);
+    }
     mCorrector[0] = 1.;
     mCorrector[1] = 1.;
     mSampleCounter = 0;
@@ -224,7 +232,6 @@ void NoiseGenerator<T>::ResetAll()
         mFirCoeffs.push_back(c_3_2_exact.at(i) - mIir_3_2.at(i));
     }
     mIirState.resize(iir_order); mIirState.fill(0);
-    mIir_3_2.clear();
     mFirState.resize(mFirOrder); mFirState.fill(0);
 }
 
