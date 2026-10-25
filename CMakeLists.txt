@@ -80,14 +80,19 @@ set_target_properties(pink_noise PROPERTIES
     WIN32_EXECUTABLE TRUE
 )
 
-# ---- Самопроверка PRNG (см. tests/lfsr_selftest.cpp) ----
-option(PINK_NOISE_BUILD_TESTS "Собрать самопроверку генератора LFSR" ON)
+# ---- Самопроверки (см. tests/) ----
+option(PINK_NOISE_BUILD_TESTS "Собрать самопроверки генератора LFSR и БПФ" ON)
 
 if(PINK_NOISE_BUILD_TESTS)
     enable_testing()
+
     add_executable(lfsr_selftest tests/lfsr_selftest.cpp)
     target_include_directories(lfsr_selftest PRIVATE ${PRNG_DIR})
     add_test(NAME lfsr_selftest COMMAND lfsr_selftest)
+
+    add_executable(rfft_selftest tests/rfft_selftest.cpp ${FFT_DIR}/rfft.cpp)
+    target_include_directories(rfft_selftest PRIVATE ${FFT_DIR})
+    add_test(NAME rfft_selftest COMMAND rfft_selftest)
 endif()
 
 include(GNUInstallDirs)

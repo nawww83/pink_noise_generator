@@ -27,6 +27,8 @@ public:
     virtual ~Rfft();
 
     // complex to complex FFT
+    // in и out не должны пересекаться (in-place не поддерживается) и должны
+    // быть выровнены на 16 байт (используются _mm_load_ps/_mm_store_ps).
     virtual void c2cfft(data_t *in, data_t *out) = 0;
     virtual void c2cifft(data_t *in, data_t *out) = 0;
 
@@ -39,7 +41,7 @@ public:
     }
 
     void setLogSize(size_t value);
-    void setMode(int _mode);
+    virtual void setMode(int _mode);
 
     size_t log2(size_t n) const;
 
@@ -94,9 +96,13 @@ protected:
 class Rfftx86: public Rfft
 {
 public:
-    Rfftx86() {}
-    void c2cfft(data_t *in, data_t *out);
-    void c2cifft(data_t *in, data_t *out);
+    // Реализован только алгоритм radix-2 (см. ditfft2lut/ditifft2lut),
+    // поэтому режим CONJUGATE не поддерживается: таблица LUT всегда
+    // выделяется под radix-2.
+    Rfftx86() { Rfft::setMode(RADIX2); }
+    void setMode(int) override { Rfft::setMode(RADIX2); }
+    void c2cfft(data_t *in, data_t *out) override;
+    void c2cifft(data_t *in, data_t *out) override;
 protected:
     void ditfft2lut(data_t* in, data_t* out, size_t n, size_t logstride);
     void ditifft2lut(data_t* in, data_t* out, size_t n, size_t logstride);

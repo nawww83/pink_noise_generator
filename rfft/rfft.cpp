@@ -625,8 +625,10 @@ void Rfftx86::ditifft2lut(data_t *in, data_t *out, size_t n, size_t logstride) {
 
     if (n>4) { // n=8,16,32...
         const size_t halfN = n>>1;
-        ditfft2lut(in, out, halfN, logstride+1);
-        ditfft2lut(in+(1<<logstride), out+halfN, halfN, logstride+1);
+        // Подпреобразования должны идти с обратным знаком в показателе,
+        // иначе базовый случай n=4 посчитается с -I вместо +I.
+        ditifft2lut(in, out, halfN, logstride+1);
+        ditifft2lut(in+(1<<logstride), out+halfN, halfN, logstride+1);
 
         //        for (size_t k=0;k<n/2;++k) {
         //            data_t tmp = out[k];
