@@ -380,10 +380,12 @@ void test_paired(const char* label, std::mt19937& rng, int iters)
 }
 
 /**
- * @brief Эталонный генератор rng2 (random_gen_2.hpp: u64 x = 0).
- * @details Дословный перенос next_u64() из
+ * @brief Эталонный генератор rng2: независимая реализация упаковки.
+ * @details Перенос next_u64() из
  * \\wsl.localhost\Ubuntu-24.04\home\novikov\lfsr\random_gen_2.hpp,
- * но на prng/lfsr.h (проверенном выше).
+ * но на prng/lfsr.h (проверенном выше). Сам файл эталона заморожен и
+ * содержит старую упаковку (XOR старших битов в бит 0), поэтому здесь
+ * повторена исправленная упаковка prng/rng2.h (XOR в бит 3 полубайта).
  */
 class RefGens2
 {
@@ -434,16 +436,16 @@ public:
             mSt %= 16;
             x <<= 4;
             x |= mSt[0];
-            x ^= high_bits[1];
+            x ^= high_bits[1] << 3;
             x <<= 4;
             x |= mSt[2];
-            x ^= high_bits[0];
+            x ^= high_bits[0] << 3;
             x <<= 4;
             x |= mSt[3];
-            x ^= high_bits[2];
+            x ^= high_bits[2] << 3;
             x <<= 4;
             x |= mSt[1];
-            x ^= high_bits[3];
+            x ^= high_bits[3] << 3;
         }
         return x;
     }
@@ -516,7 +518,7 @@ int main()
     test_paired<23>("p=23", rng, iters);
     test_paired<251>("p=251", rng, iters);
 
-    std::printf("\n[rng2] gens::next() vs random_gen_2.hpp (next_u64)\n");
+    std::printf("\n[rng2] gens::next() vs RefGens2 (next_u64)\n");
     test_rng2("seed#1", rng, iters);
     test_rng2("seed#2", rng, iters);
     test_rng2("seed#3", rng, 10 * iters);
